@@ -118,42 +118,42 @@
 </template>
 
 <script>
-import axios from "axios";
-export default {
-  name: "App",
+  import axios from 'axios';
+  export default {
+    name: 'App',
 
-  data() {
-    return {
-      donors: null,
-      valid: false,
-      email: "",
-      donor_id: "",
-      message: "",
-      emailRules: [
-        (value) => {
-          if (value) return true;
+    data() {
+      return {
+        donors: null,
+        valid: false,
+        email: '',
+        donor_id: '',
+        message: '',
+        emailRules: [
+          (value) => {
+            if (value) return true;
 
-          return "E-mail is required.";
-        },
-      ],
-      messageRules: [
-        (value) => {
-          if (value) return true;
+            return 'E-mail is required.';
+          },
+        ],
+        messageRules: [
+          (value) => {
+            if (value) return true;
 
-          return "Message is required.";
-        },
-      ],
-    };
-  },
-  mounted() {
-    axios
-      .get("https://interview.ribbon.giving/api/donors")
-      .then((response) => (this.donors = response.data));
-  },
-  methods: {
-    async submit() {
-      // Send message to server.
+            return 'Message is required.';
+          },
+        ],
+      };
     },
-  },
-};
+    mounted() {
+      axios
+        .get('https://interview.ribbon.giving/api/donors')
+        .then((response) => (this.donors = response.data));
+    },
+    methods: {
+      async submit() {
+        // Send message to server.
+      },
+    },
+  };
 </script>
