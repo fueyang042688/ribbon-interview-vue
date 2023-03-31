@@ -115,6 +115,7 @@
                 <v-form
                   v-model="valid"
                   validate-on="submit"
+                  ref="form"
                   @submit.prevent="submit"
                 >
                   <v-textarea
@@ -122,17 +123,39 @@
                     :rules="messageRules"
                     label="Message"
                   ></v-textarea>
-                  <v-text-field
-                    v-model="email"
+                  <v-autocomplete
+                    v-model="selectedDonor"
+                    :items="emails"
+                    item-text="email"
+                    item-value="id"
+                    :loading="emailLoading"
+                    :search-input.sync="searchEmail"
+                    :menu-props="{ offsetY: true }"
                     :rules="emailRules"
                     label="Email"
-                  ></v-text-field>
+                    @change="onEmailSelect"
+                  ></v-autocomplete>
                   <v-text-field
                     v-model="donor_id"
                     label="Donor Id"
+                    :disabled="true"
                   ></v-text-field>
                   <v-btn type="submit" block class="mt-2">Send</v-btn>
                 </v-form>
+                <v-snackbar
+                  v-model="sendMessageSuccess"
+                  :timeout="2000"
+                  color="success"
+                >
+                  Message sent successfully!
+                </v-snackbar>
+                <v-snackbar
+                  v-model="sendMessageFail"
+                  :timeout="2000"
+                  color="error"
+                >
+                  An error occurred while sending the message. Please try again.
+                </v-snackbar>
               </v-sheet>
             </v-row>
           </v-container>
@@ -164,19 +187,15 @@
         email: '',
         donor_id: '',
         message: '',
-        emailRules: [
-          (value) => {
-            if (value) return true;
-
-            return 'E-mail is required.';
-          },
-        ],
+        selectedDonor: null,
+        emails: [],
+        searchEmail: '',
+        emailRules: [(value) => !!value || 'Email is required'],
         messageRules: [
-          (value) => {
-            if (value) return true;
-
-            return 'Message is required.';
-          },
+          (value) => !!value || 'Message is required',
+          (value) =>
+            (value && value.length >= 15) ||
+            'Message must be at least 15 characters',
         ],
         headers: [
           { text: 'Name', value: 'full_name' },
@@ -190,11 +209,19 @@
           page: 1,
         },
         search: '',
+        emailLoading: false,
         loading: false,
+        sendMessageSuccess: false,
+        sendMessageFail: false,
       };
     },
     mounted() {
       this.fetchDonors();
+    },
+    watch: {
+      searchEmail(val) {
+        val && !this.selectedDonor && this.fetchDonorsByEmail(val);
+      },
     },
     methods: {
       async fetchDonors() {
@@ -227,8 +254,43 @@
         });
         return formatter.format(amount);
       },
+      onEmailSelect(val) {
+        this.donor_id = val;
+      },
+      async fetchDonorsByEmail(val) {
+        this.emailLoading = true;
+        try {
+          const response = await axios.get(
+            `https://interview.ribbon.giving/api/donors?search=${val}`
+          );
+          this.emails = response.data.data;
+        } catch (error) {
+          console.error(error);
+        }
+
+        this.emailLoading = false;
+      },
       async submit() {
-        // Send message to server.
+        if (this.$refs.form.validate()) {
+          try {
+            const { data } = await axios.post(
+              `https://interview.ribbon.giving/api/donors/${this.selectedDonor}/send-message`,
+              { message: this.message },
+              {
+                headers: {
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+            if (data.Success) {
+              this.$refs.form.reset();
+              this.sendMessageSuccess = true;
+            }
+          } catch (error) {
+            this.sendMessageFail = true;
+          }
+        }
       },
     },
     computed: {
