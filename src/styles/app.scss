@@ -1,0 +1,12 @@
+#donor-table {
+    color: rgba(58, 58, 64, 0.87);
+
+    .v-data-table-header {
+        background-color: rgba(58, 58, 64, 0.05);
+    }
+    .donor-table-row {
+        &:hover {
+            background-color: rgba(58, 58, 64, 0.03);
+        }
+    }
+}

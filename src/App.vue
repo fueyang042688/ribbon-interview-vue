@@ -39,24 +39,59 @@
             </v-row>
             <v-row>
               <v-col>
-                <table v-if="donors">
-                  <thead>
+                <v-data-table
+                  v-if="donors"
+                  :headers="headers"
+                  :items="donors.data"
+                  :search="search"
+                  :loading="loading"
+                  :options="pagination"
+                  :server-items-length="donors.total"
+                  :footer-props="{
+                    'items-per-page-options': [5, 10, 20],
+                  }"
+                  id="donor-table"
+                  class="elevation-1"
+                >
+                  <template v-slot:progress v-if="loading">
+                    <v-progress-linear
+                      indeterminate
+                      color="#00754A"
+                    ></v-progress-linear>
+                  </template>
+                  <template v-slot:top>
+                    <v-text-field
+                      v-model="search"
+                      label="Search"
+                      class="mx-4"
+                    ></v-text-field>
+                  </template>
+                  <template #header="{ headers, disableSort }">
                     <tr>
-                      <th class="text-left">Name</th>
-                      <th class="text-left">Email</th>
-                      <th class="text-left">Total Donations</th>
-                      <th class="text-left">First Donation</th>
+                      <th
+                        v-for="header in headers"
+                        :key="header.text"
+                        :class="[
+                          'text-left',
+                          'table-header',
+                          { 'tet-disabled': disableSort(header) },
+                        ]"
+                        @click="sortBy(header.value)"
+                      >
+                        <v-icon small>arrow-upward</v-icon>
+                        {{ header.text }}
+                      </th>
                     </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in donors.data" :key="item.id">
+                  </template>
+                  <template #item="{ item }">
+                    <tr :key="item.id" class="donor-table-row">
                       <td>{{ item.full_name }}</td>
                       <td>{{ item.email }}</td>
-                      <td>{{ item.total_donations }}</td>
-                      <td>{{ item.first_donation }}</td>
+                      <td>{{ formatCurrency(item.total_donations) }}</td>
+                      <td>{{ formatDate(item.first_donation) }}</td>
                     </tr>
-                  </tbody>
-                </table>
+                  </template>
+                </v-data-table>
               </v-col>
             </v-row>
           </v-container>
@@ -80,6 +115,7 @@
                 <v-form
                   v-model="valid"
                   validate-on="submit"
+                  ref="form"
                   @submit.prevent="submit"
                 >
                   <v-textarea
@@ -87,17 +123,39 @@
                     :rules="messageRules"
                     label="Message"
                   ></v-textarea>
-                  <v-text-field
-                    v-model="email"
+                  <v-autocomplete
+                    v-model="selectedDonor"
+                    :items="emails"
+                    item-text="email"
+                    item-value="id"
+                    :loading="emailLoading"
+                    :search-input.sync="searchEmail"
+                    :menu-props="{ offsetY: true }"
                     :rules="emailRules"
                     label="Email"
-                  ></v-text-field>
+                    @change="onEmailSelect"
+                  ></v-autocomplete>
                   <v-text-field
                     v-model="donor_id"
                     label="Donor Id"
+                    :disabled="true"
                   ></v-text-field>
                   <v-btn type="submit" block class="mt-2">Send</v-btn>
                 </v-form>
+                <v-snackbar
+                  v-model="sendMessageSuccess"
+                  :timeout="2000"
+                  color="success"
+                >
+                  Message sent successfully!
+                </v-snackbar>
+                <v-snackbar
+                  v-model="sendMessageFail"
+                  :timeout="2000"
+                  color="error"
+                >
+                  An error occurred while sending the message. Please try again.
+                </v-snackbar>
               </v-sheet>
             </v-row>
           </v-container>
@@ -118,42 +176,136 @@
 </template>
 
 <script>
-import axios from "axios";
-export default {
-  name: "App",
+  import axios from 'axios';
+  export default {
+    name: 'App',
 
-  data() {
-    return {
-      donors: null,
-      valid: false,
-      email: "",
-      donor_id: "",
-      message: "",
-      emailRules: [
-        (value) => {
-          if (value) return true;
-
-          return "E-mail is required.";
+    data() {
+      return {
+        donors: null,
+        valid: false,
+        email: '',
+        donor_id: '',
+        message: '',
+        selectedDonor: null,
+        emails: [],
+        searchEmail: '',
+        emailRules: [(value) => !!value || 'Email is required'],
+        messageRules: [
+          (value) => !!value || 'Message is required',
+          (value) =>
+            (value && value.length >= 15) ||
+            'Message must be at least 15 characters',
+        ],
+        headers: [
+          { text: 'Name', value: 'full_name' },
+          { text: 'Email', value: 'email' },
+          { text: 'Total Donations', value: 'total_donations' },
+          { text: 'First Donation', value: 'first_donation' },
+        ],
+        pagination: {
+          descending: false,
+          rowsPerPage: 10,
+          page: 1,
         },
-      ],
-      messageRules: [
-        (value) => {
-          if (value) return true;
-
-          return "Message is required.";
-        },
-      ],
-    };
-  },
-  mounted() {
-    axios
-      .get("https://interview.ribbon.giving/api/donors")
-      .then((response) => (this.donors = response.data));
-  },
-  methods: {
-    async submit() {
-      // Send message to server.
+        search: '',
+        emailLoading: false,
+        loading: false,
+        sendMessageSuccess: false,
+        sendMessageFail: false,
+      };
     },
-  },
-};
+    mounted() {
+      this.fetchDonors();
+    },
+    watch: {
+      searchEmail(val) {
+        val && !this.selectedDonor && this.fetchDonorsByEmail(val);
+      },
+    },
+    methods: {
+      async fetchDonors() {
+        try {
+          this.loading = true;
+          const response = await axios.get(
+            'https://interview.ribbon.giving/api/donors'
+          );
+          this.donors = response.data;
+          this.loading = false;
+        } catch (error) {
+          console.error(error);
+        }
+      },
+      searchDonors(item, search) {
+        return (
+          item.full_name.toLowerCase().includes(search.toLowerCase()) ||
+          item.email.toLowerCase().includes(search.toLowerCase())
+        );
+      },
+      formatDate(date) {
+        const options = { year: 'numeric', month: 'short', day: 'numeric' };
+        return new Date(date).toLocaleDateString(undefined, options);
+      },
+      formatCurrency(amount) {
+        const formatter = new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          minimumFractionDigits: 2,
+        });
+        return formatter.format(amount);
+      },
+      onEmailSelect(val) {
+        this.donor_id = val;
+      },
+      async fetchDonorsByEmail(val) {
+        this.emailLoading = true;
+        try {
+          const response = await axios.get(
+            `https://interview.ribbon.giving/api/donors?search=${val}`
+          );
+          this.emails = response.data.data;
+        } catch (error) {
+          console.error(error);
+        }
+
+        this.emailLoading = false;
+      },
+      async submit() {
+        if (this.$refs.form.validate()) {
+          try {
+            const { data } = await axios.post(
+              `https://interview.ribbon.giving/api/donors/${this.selectedDonor}/send-message`,
+              { message: this.message },
+              {
+                headers: {
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+            if (data.Success) {
+              this.$refs.form.reset();
+              this.sendMessageSuccess = true;
+            }
+          } catch (error) {
+            this.sendMessageFail = true;
+          }
+        }
+      },
+    },
+    computed: {
+      filterDonors() {
+        if (!this.search) {
+          return this.donors.data;
+        }
+
+        return this.donors.data.filter((item) =>
+          this.searchDonors(item, this.search)
+        );
+      },
+    },
+  };
 </script>
+<style lang="scss">
+  @import './styles/app.scss';
+</style>
